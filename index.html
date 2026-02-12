@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NEON WORLD | GHOST EDITION</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; color: #fff; font-family: 'Courier New', monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #game-wrap { position: relative; width: 800px; height: 500px; border: 2px solid #0ff; background: #000; overflow: hidden; box-shadow: 0 0 20px #0ff; border-radius: 10px; }
+        canvas { display: block; }
+        #ui-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.95); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #chat-input { position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); width: 50%; background: rgba(0,0,0,0.8); border: 1px solid #0ff; color: #0ff; padding: 12px; outline: none; display: none; z-index: 50; border-radius: 20px; text-align: center; }
+        #leave-btn { position: absolute; top: 15px; left: 15px; background: rgba(255,0,0,0.2); border: 1px solid #f00; color: #f00; padding: 5px 12px; cursor: pointer; font-size: 10px; display: none; z-index: 60; border-radius: 3px; }
+        .hat-grid { width: 340px; height: 160px; overflow-y: auto; background: rgba(255,255,255,0.05); border: 1px solid #444; border-radius: 8px; padding: 10px; margin: 10px 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .hat-btn { background: #222; border: 1px solid #444; color: #fff; padding: 10px; cursor: pointer; border-radius: 5px; font-size: 20px; }
+        .hat-btn.active { border-color: #0ff; background: #004444; }
+        input { background: #111; border: 1px solid #444; color: #fff; padding: 10px; text-align: center; border-radius: 5px; margin: 5px; outline: none; }
+        button#join-btn { background: #0ff; border: none; padding: 15px 50px; cursor: pointer; font-weight: bold; margin-top: 15px; border-radius: 5px; color: #000; }
+        .secret-box { width: 120px; font-size: 9px; opacity: 0.4; }
+    </style>
+</head>
+<body>
+
+<div id="game-wrap">
+    <div id="ui-overlay">
+        <h1 style="color:#0ff; letter-spacing: 5px;">NEON WORLD</h1>
+        <input type="text" id="name-in" placeholder="NICKNAME" maxlength="10">
+        <div class="hat-grid">
+            <button class="hat-btn active" onclick="setHat('none', this)">❌</button>
+            <button class="hat-btn" onclick="setHat('fire', this)">🔥</button>
+            <button class="hat-btn" onclick="setHat('ghost', this)">👻</button>
+            <button class="hat-btn" onclick="setHat('alien', this)">👽</button>
+        </div>
+        <button id="join-btn" onclick="initP2P()">ENTER WORLD</button>
+        <input type="password" class="secret-box" placeholder="ACCESS CODE" oninput="checkKey(this.value)">
+    </div>
+    <button id="leave-btn" onclick="location.reload()">LEAVE</button>
+    <canvas id="ctx" width="800" height="500"></canvas>
+    <input type="text" id="chat-input" placeholder="Type and hit Enter..." maxlength="40">
+</div>
+
+<script>
+const canvas = document.getElementById('ctx');
+const ctx = canvas.getContext('2d');
+const ui = document.getElementById('ui-overlay');
+let peer, conn, connections = [];
+let player = { x: 385, y: 235, name: 'Guest', color: '#0ff', hat: 'none', isAdmin: false, isGhost: false, isVIP: false, isTrusted: false, msg: '', msgTime: 0, lastSeen: Date.now() };
+let otherPlayers = {};
+let keys = {};
+
+function checkKey(val) {
+    player.isAdmin = player.isGhost = player.isVIP = player.isTrusted = false;
+    player.color = "#0ff";
+    if (val === 'brax-admin-99') { player.isAdmin = true; player.color = "#fff"; }
+    else if (val === 'spirit-ghost-22') { player.isGhost = true; player.color = "rgba(200,200,255,0.5)"; }
+    else if (val === 'vip-neon-77') { player.isVIP = true; player.color = "#f0f"; }
+    else if (val === 'friend-access-11') { player.isTrusted = true; player.color = "#0ff"; }
+}
+
+function setHat(t, btn) {
+    player.hat = t;
+    document.querySelectorAll('.hat-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+
+function initP2P() {
+    player.name = document.getElementById('name-in').value || 'Guest';
+    peer = new Peer('BRAX_GHOST_VER_3');
+    peer.on('open', () => { 
+        peer.on('connection', c => {
+            connections.push(c);
+            c.on('data', data => { if(data.id) { data.lastSeen = Date.now(); otherPlayers[data.id] = data; } });
+        });
+        start(); 
+    });
+    peer.on('error', () => {
+        peer = new Peer();
+        peer.on('open', () => {
+            conn = peer.connect('BRAX_GHOST_VER_3');
+            conn.on('data', data => { if(data.type==='sync') { for(let id in data.players) data.players[id].lastSeen = Date.now(); otherPlayers = data.players; } });
+            start();
+        });
+    });
+}
+
+function start() { ui.style.display = 'none'; document.getElementById('leave-btn').style.display = 'block'; requestAnimationFrame(loop); }
+
+function drawGhostShape(x, y, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x + 15, y + 10, 15, Math.PI, 0); // Rounded head
+    ctx.lineTo(x + 30, y + 25);
+    let wave = Math.sin(Date.now() / 150) * 4;
+    ctx.bezierCurveTo(x + 22, y + 30 + wave, x + 15, y + 20 + wave, x + 7, y + 30 + wave);
+    ctx.lineTo(x, y + 25);
+    ctx.fill();
+    // Eyes
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.arc(x + 10, y + 12, 2, 0, 7); ctx.arc(x + 20, y + 12, 2, 0, 7);
+    ctx.fill();
+}
+
+function drawPlayer(u) {
+    let now = Date.now();
+    ctx.globalAlpha = u.isGhost ? 0.5 : 1.0;
+    
+    if (u.isGhost || u.hat === 'ghost') {
+        drawGhostShape(u.x, u.y, u.color);
+    } else {
+        ctx.fillStyle = u.color;
+        ctx.shadowBlur = 10; ctx.shadowColor = u.color;
+        ctx.fillRect(u.x, u.y, 30, 30);
+        ctx.shadowBlur = 0;
+    }
+    
+    ctx.globalAlpha = 1.0;
+    let bob = Math.sin(now / 250) * 5;
+    ctx.font = 'bold 11px Courier'; ctx.textAlign = 'center';
+
+    if(u.isAdmin) {
+        ctx.fillStyle = `hsl(${(now/10)%360}, 100%, 70%)`;
+        ctx.fillText('OWNER', u.x+15, u.y-35+bob);
+    } else if(u.isVIP) {
+        ctx.fillStyle = "#f0f"; ctx.fillText('VIP', u.x+15, u.y-35+bob);
+    } else if(u.isGhost) {
+        ctx.fillStyle = "#aaa"; ctx.fillText('GHOST', u.x+15, u.y-35+bob);
+    } else if(u.isTrusted) {
+        ctx.fillStyle = "#0ff"; ctx.fillText('TRUSTED', u.x+15, u.y-35+bob);
+    }
+
+    if(u.msgTime > 0) { ctx.fillStyle = "#fff"; ctx.fillText(u.msg, u.x+15, u.y-15); u.msgTime--; }
+    ctx.fillStyle = "#fff"; ctx.font = "10px Courier"; ctx.fillText(u.name, u.x+15, u.y+45);
+}
+
+function loop() {
+    ctx.fillStyle = "#000"; ctx.fillRect(0,0,800,500);
+    let now = Date.now();
+    player.lastSeen = now;
+
+    for (let id in otherPlayers) {
+        if (now - otherPlayers[id].lastSeen > 5000) delete otherPlayers[id];
+    }
+
+    let speed = player.isGhost ? 6 : 4;
+    if(document.getElementById('chat-input').style.display !== 'block') {
+        if(keys.KeyW && player.y > 0) player.y -= speed;
+        if(keys.KeyS && player.y < 470) player.y += speed;
+        if(keys.KeyA && player.x > 0) player.x -= speed;
+        if(keys.KeyD && player.x < 770) player.x += speed;
+    }
+
+    if(conn && conn.open) conn.send({ id: peer.id, ...player });
+    else connections.forEach(c => c.open && c.send({ type:'sync', players: { [peer.id]: player, ...otherPlayers } }));
+    
+    for(let id in otherPlayers) drawPlayer(otherPlayers[id]);
+    drawPlayer(player);
+    requestAnimationFrame(loop);
+}
+
+window.onkeydown = e => {
+    if(e.code === 'Enter') {
+        const ci = document.getElementById('chat-input');
+        if(ci.style.display === 'block') {
+            if(ci.value.trim()) { player.msg = ci.value; player.msgTime = 150; }
+            ci.style.display = 'none'; ci.value = '';
+        } else if(ui.style.display === 'none') { ci.style.display = 'block'; ci.focus(); }
+    }
+    keys[e.code] = true;
+};
+window.onkeyup = e => keys[e.code] = false;
+</script>
+</body>
+</html>
